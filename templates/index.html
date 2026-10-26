@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>FlaskGPT — Assistant IA</title>
+
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+    <link rel="stylesheet"
+          href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.2.0/styles/default.min.css">
+
+    <script defer src="https://cdn.jsdelivr.net/npm/showdown@2.1.0/dist/showdown.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+    <script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.2.0/highlight.min.js"></script>
+    <script defer src="{{ url_for('static', filename='js/script.js') }}"></script>
+    <script defer src="{{ url_for('static', filename='js/sources.js') }}"></script>
+    <script defer src="{{ url_for('static', filename='js/panels.js') }}"></script>
+</head>
+
+<body>
+<div class="app">
+
+    <!-- ===================== Barre latérale ===================== -->
+    <aside class="sidebar">
+        <div class="brand">
+            <span class="brand-mark">F</span>
+            <div>
+                <h1>FlaskGPT</h1>
+                <p>Votre assistant intelligent</p>
+            </div>
+        </div>
+
+        <button id="btn-new" class="btn btn-primary btn-block" type="button">+ Nouvelle conversation</button>
+
+        <section class="side-section">
+            <h2>Historique</h2>
+            <ul id="conversation-list" class="conv-list" aria-label="Historique des conversations"></ul>
+        </section>
+
+        <section class="side-section">
+            <h2>Sources</h2>
+            <label class="btn btn-ghost btn-block file-btn">
+                Ajouter un document
+                <input id="source-file" type="file" accept=".txt,.md,.csv,.json,.pdf,.docx" hidden>
+            </label>
+            <p class="hint">TXT, MD, PDF, DOCX, CSV, JSON. Cochez les documents à consulter.</p>
+            <ul id="source-list" class="source-list"></ul>
+            <label class="field-inline">
+                Extraits par source
+                <input id="per-source" type="number" min="1" max="5" value="2">
+            </label>
+        </section>
+    </aside>
+
+    <!-- ===================== Zone principale ===================== -->
+    <main class="main">
+        <header class="topbar">
+            <div class="topbar-left">
+                <label for="domain-select" class="sr-only">Domaine de la conversation</label>
+                <select id="domain-select" class="select" title="Domaine de la conversation">
+                    {% for key, d in domains.items() %}
+                    <option value="{{ key }}">{{ d.label }}</option>
+                    {% endfor %}
+                </select>
+                <span id="dataset-chip" class="chip" hidden></span>
+            </div>
+
+            <div class="topbar-right">
+                <button id="btn-clear" class="btn btn-danger" type="button"
+                        title="Supprimer cette conversation et en démarrer une nouvelle">Effacer et recommencer</button>
+
+                <details id="export-menu" class="menu">
+                    <summary class="btn btn-ghost">Exporter</summary>
+                    <div class="menu-panel">
+                        <button type="button" data-export="txt">Texte (.txt)</button>
+                        <button type="button" data-export="json">JSON (.json)</button>
+                        <button type="button" data-export="pdf">PDF complet (.pdf)</button>
+                        <hr>
+                        <button type="button" id="btn-summary">Résumé PDF (généré par l'IA)</button>
+                    </div>
+                </details>
+            </div>
+        </header>
+
+        <nav class="tabs" role="tablist">
+            <button class="tab is-active" data-tab="chat" role="tab" type="button">Conversation</button>
+            <button class="tab" data-tab="data" role="tab" type="button">Gouvernance des données</button>
+            <button class="tab" data-tab="stats" role="tab" type="button">Performances</button>
+        </nav>
+
+        <!-- ---------- Onglet conversation ---------- -->
+        <section id="tab-chat" class="tab-panel">
+            <div class="legend" aria-label="Légende des couleurs d'évaluation">
+                <span><i class="dot q-good"></i> Satisfaisante (4-5)</span>
+                <span><i class="dot q-mid"></i> Moyenne (3)</span>
+                <span><i class="dot q-bad"></i> Insuffisante (1-2)</span>
+                <span><i class="dot q-none"></i> Non évaluée</span>
+            </div>
+
+            <div id="gpt-output" class="messages" aria-live="polite">
+                <div id="empty-state" class="empty">
+                    <h2>Que puis-je faire pour vous ?</h2>
+                    <p>Choisissez un domaine, ajoutez éventuellement des documents sources, puis posez votre question.</p>
+                </div>
+            </div>
+
+            <form id="prompt-form" class="composer">
+                <label for="prompt" class="sr-only">Votre message</label>
+                <input id="prompt" name="prompt" type="text" required autocomplete="off"
+                       placeholder="Posez votre question…">
+                <button type="submit" class="btn btn-primary">Envoyer</button>
+            </form>
+        </section>
+
+        <!-- ---------- Onglet gouvernance des données ---------- -->
+        <section id="tab-data" class="tab-panel" hidden>
+            <div class="card">
+                <h2>Importer une base de données à analyser</h2>
+                <p class="hint">CSV, Excel (.xlsx), JSON ou base SQLite (.db / .sqlite). Le rapport évalue la complétude,
+                    l'unicité, la cohérence, la validité et les anomalies, et repère les données personnelles.</p>
+                <form id="dataset-form" class="inline-form">
+                    <input id="dataset-file" type="file" accept=".csv,.tsv,.txt,.xlsx,.xlsm,.json,.db,.sqlite,.sqlite3" required>
+                    <button class="btn btn-primary" type="submit">Analyser</button>
+                </form>
+                <ul id="dataset-list" class="dataset-list"></ul>
+            </div>
+            <div id="dataset-report"></div>
+        </section>
+
+        <!-- ---------- Onglet performances ---------- -->
+        <section id="tab-stats" class="tab-panel" hidden>
+            <div class="stats-head">
+                <h2>Indicateurs de performance</h2>
+                <button id="btn-refresh-stats" class="btn btn-ghost" type="button">Actualiser</button>
+            </div>
+            <div id="stats-view"></div>
+        </section>
+    </main>
+</div>
+
+<!-- Modèle d'un message -->
+<template id="message-template">
+    <article class="msg">
+        <div class="msg-role"></div>
+        <div class="message"></div>
+        <div class="sources" hidden></div>
+        <footer class="msg-footer" hidden>
+            <div class="rating" role="group" aria-label="Noter la réponse"></div>
+            <span class="rating-label"></span>
+            <span class="metrics"></span>
+        </footer>
+    </article>
+</template>
+
+<!-- Passage d'un document (vérification d'une citation) -->
+<dialog id="passage-dialog" class="dialog">
+    <form method="dialog" class="dialog-head">
+        <h3 id="passage-title"></h3>
+        <button class="btn btn-ghost" value="close">Fermer</button>
+    </form>
+    <div id="passage-body" class="dialog-body"></div>
+</dialog>
+
+<div id="toasts" class="toasts" aria-live="assertive"></div>
+</body>
+</html>
